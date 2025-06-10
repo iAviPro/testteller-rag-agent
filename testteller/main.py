@@ -137,12 +137,13 @@ async def ingest_code_async(source_path: str, collection_name: str, no_cleanup_g
 async def generate_async(query: str, collection_name: str, num_retrieved: int, output_file: str | None):
     agent = _get_agent(collection_name)
 
-    if await agent.get_ingested_data_count() == 0:
+    current_count = await agent.get_ingested_data_count()
+    if current_count == 0:
         print(
             f"Warning: Collection '{collection_name}' is empty. Generation will rely on LLM's general knowledge.")
         if not typer.confirm("Proceed anyway?", default=True):
             print("Generation aborted.")
-            raise typer.Exit()
+            return
 
     test_cases = await agent.generate_test_cases(query, n_retrieved_docs=num_retrieved)
     print("\n--- Generated Test Cases ---")
