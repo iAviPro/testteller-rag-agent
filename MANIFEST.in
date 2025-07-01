@@ -2,4 +2,6 @@
 include LICENSE
 include README.md
 include requirements.txt
+include .env.example
+include .env.docker.example
 include testteller/prompts.py

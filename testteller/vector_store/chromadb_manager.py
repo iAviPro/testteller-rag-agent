@@ -19,7 +19,7 @@ from chromadb.api.types import (
 )
 from testteller.config import settings
 from testteller.constants import DEFAULT_COLLECTION_NAME, DEFAULT_CHROMA_HOST, DEFAULT_CHROMA_PORT, DEFAULT_CHROMA_PERSIST_DIRECTORY
-from testteller.llm.gemini_client import GeminiClient
+from testteller.llm.llm_manager import LLMManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class ChromaDBManager:
 
     def __init__(
         self,
-        gemini_client: GeminiClient,
+        llm_manager: LLMManager,
         collection_name: Optional[str] = None,
         persist_directory: Optional[str] = None,
         host: Optional[str] = None,
@@ -45,14 +45,14 @@ class ChromaDBManager:
         Initialize ChromaDB manager with configuration from settings or parameters.
 
         Args:
-            gemini_client: Instance of GeminiClient for embeddings
+            llm_manager: Instance of LLMManager for embeddings
             collection_name: Name of the ChromaDB collection (optional)
             persist_directory: Directory for ChromaDB persistence (optional)
             host: Host for remote ChromaDB (optional)
             port: Port for remote ChromaDB (optional)
             use_remote: Whether to use remote ChromaDB (optional)
         """
-        self.gemini_client = gemini_client
+        self.llm_manager = llm_manager
 
         # Get configuration from settings if available, otherwise use defaults/parameters
         try:
@@ -92,8 +92,9 @@ class ChromaDBManager:
         self.embedding_function = self._create_embedding_function()
         self.collection = self._get_or_create_collection()
         logger.info(
-            "Initialized ChromaDB manager with collection '%s' %s",
+            "Initialized ChromaDB manager with collection '%s' using %s LLM %s",
             self.collection_name,
+            self.llm_manager.provider,
             f"at {self.host}:{self.port}" if self.use_remote else f"in {self.persist_directory}"
         )
 
@@ -130,7 +131,7 @@ class ChromaDBManager:
         try:
             # Get embeddings for all documents
             embeddings = [
-                self.gemini_client.get_embedding_sync(doc) for doc in documents
+                self.llm_manager.get_embedding_sync(doc) for doc in documents
             ]
 
             # If no IDs provided, generate unique IDs
@@ -201,7 +202,7 @@ class ChromaDBManager:
     ) -> QueryResult:
         """Query similar documents from the collection."""
         try:
-            query_embedding = self.gemini_client.get_embedding_sync(query_text)
+            query_embedding = self.llm_manager.get_embedding_sync(query_text)
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
@@ -247,13 +248,13 @@ class ChromaDBManager:
             raise
 
     def _create_embedding_function(self) -> EmbeddingFunction:
-        """Create and return the Gemini embedding function."""
-        class GeminiChromaEmbeddingFunction(EmbeddingFunction):
-            def __init__(self, gem_client: GeminiClient):
-                self.gem_client = gem_client
+        """Create and return the LLM embedding function."""
+        class LLMChromaEmbeddingFunction(EmbeddingFunction):
+            def __init__(self, llm_client: LLMManager):
+                self.llm_client = llm_client
 
             def __call__(self, input_texts: List[str]) -> List[List[float]]:
-                raw_embeddings = self.gem_client.get_embedding_sync(
+                raw_embeddings = self.llm_client.get_embedding_sync(
                     input_texts)
                 valid_embeddings: List[List[float]] = []
                 embedding_dim = 768  # For "models/embedding-001"
@@ -268,7 +269,7 @@ class ChromaDBManager:
 
                 return valid_embeddings
 
-        return GeminiChromaEmbeddingFunction(self.gemini_client)
+        return LLMChromaEmbeddingFunction(self.llm_manager)
 
     async def _run_collection_method(self, method_name: str, *pos_args, **kw_args) -> Any:
         """

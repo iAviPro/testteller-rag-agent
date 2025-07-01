@@ -5,11 +5,11 @@ import logging
 import os
 from typing import List, Dict, Any, Optional
 from testteller.config import settings
-from testteller.llm.gemini_client import GeminiClient
+from testteller.llm.llm_manager import LLMManager
 from testteller.vector_store.chromadb_manager import ChromaDBManager
 from testteller.data_ingestion.document_loader import DocumentLoader
 from testteller.data_ingestion.code_loader import CodeLoader
-from testteller.prompts import TEST_CASE_GENERATION_PROMPT_TEMPLATE
+from testteller.prompts import TEST_CASE_GENERATION_PROMPT_TEMPLATE, get_test_case_generation_prompt
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -24,25 +24,26 @@ class TestTellerAgent:
     def __init__(
         self,
         collection_name: Optional[str] = None,
-        gemini_client: Optional[GeminiClient] = None
+        llm_manager: Optional[LLMManager] = None
     ):
         """
         Initialize the TestTellerAgent.
 
         Args:
             collection_name: Name of the ChromaDB collection (optional)
-            gemini_client: Instance of GeminiClient (optional)
+            llm_manager: Instance of LLMManager (optional)
         """
         self.collection_name = collection_name or self._get_collection_name()
-        self.gemini_client = gemini_client or GeminiClient()
+        self.llm_manager = llm_manager or LLMManager()
         self.vector_store = ChromaDBManager(
-            gemini_client=self.gemini_client,
+            llm_manager=self.llm_manager,
             collection_name=self.collection_name
         )
         self.document_loader = DocumentLoader()
         self.code_loader = CodeLoader()
         logger.info(
-            "Initialized TestTellerAgent with collection '%s'", self.collection_name)
+            "Initialized TestTellerAgent with collection '%s' and LLM provider '%s'",
+            self.collection_name, self.llm_manager.provider)
 
     def _get_collection_name(self) -> str:
         """Get collection name from settings or use default."""
@@ -164,15 +165,18 @@ class TestTellerAgent:
             )
             similar_tests = results.get('documents', [[]])[0]
 
-            # Build prompt with context
-            prompt = TEST_CASE_GENERATION_PROMPT_TEMPLATE.format(
+            # Get provider-optimized prompt
+            current_provider = self.llm_manager.get_current_provider()
+            prompt = get_test_case_generation_prompt(
+                provider=current_provider,
                 context="\n\n".join(similar_tests),
                 query=code_context
             )
 
-            # Generate test cases
-            response_text = await self.gemini_client.generate_text_async(prompt)
-            logger.info("Generated test cases for code context")
+            # Generate test cases using LLM Manager
+            response_text = await self.llm_manager.generate_text_async(prompt)
+            logger.info("Generated test cases for code context using %s provider with optimized prompt",
+                        self.llm_manager.provider)
             return response_text
 
         except Exception as e:
@@ -199,7 +203,8 @@ class TestTellerAgent:
                 metadatas=metadatas,
                 ids=ids
             )
-            logger.info("Added %d test cases to vector store", len(test_cases))
+            logger.info("Added %d test cases to the vector store",
+                        len(test_cases))
         except Exception as e:
             logger.error("Error adding test cases: %s", e)
             raise
@@ -208,7 +213,11 @@ class TestTellerAgent:
         """Clear all test cases from the vector store."""
         try:
             self.vector_store.clear_collection()
-            logger.info("Cleared all test cases from vector store")
+            logger.info("Cleared all test cases from the vector store")
         except Exception as e:
             logger.error("Error clearing test cases: %s", e)
             raise
+
+
+# Create an alias for backward compatibility
+TestTellerRagAgent = TestTellerAgent

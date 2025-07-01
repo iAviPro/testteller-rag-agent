@@ -20,15 +20,23 @@ from .constants import (
     DEFAULT_LOG_LEVEL, DEFAULT_LOG_FORMAT,
     DEFAULT_CHROMA_HOST, DEFAULT_CHROMA_PORT, DEFAULT_CHROMA_USE_REMOTE,
     DEFAULT_CHROMA_PERSIST_DIRECTORY, DEFAULT_COLLECTION_NAME,
+    DEFAULT_LLM_PROVIDER, SUPPORTED_LLM_PROVIDERS,
     DEFAULT_GEMINI_EMBEDDING_MODEL, DEFAULT_GEMINI_GENERATION_MODEL,
+    DEFAULT_OPENAI_EMBEDDING_MODEL, DEFAULT_OPENAI_GENERATION_MODEL,
+    DEFAULT_CLAUDE_GENERATION_MODEL,
+    DEFAULT_LLAMA_EMBEDDING_MODEL, DEFAULT_LLAMA_GENERATION_MODEL, DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CODE_EXTENSIONS, DEFAULT_TEMP_CLONE_DIR,
     DEFAULT_OUTPUT_FILE,
     DEFAULT_API_RETRY_ATTEMPTS, DEFAULT_API_RETRY_WAIT_SECONDS,
-    ENV_GOOGLE_API_KEY, ENV_GITHUB_TOKEN, ENV_LOG_LEVEL,
+    ENV_GOOGLE_API_KEY, ENV_OPENAI_API_KEY, ENV_CLAUDE_API_KEY, ENV_GITHUB_TOKEN,
+    ENV_LLM_PROVIDER, ENV_LOG_LEVEL,
     ENV_CHROMA_DB_HOST, ENV_CHROMA_DB_PORT, ENV_CHROMA_DB_USE_REMOTE,
     ENV_CHROMA_DB_PERSIST_DIRECTORY, ENV_DEFAULT_COLLECTION_NAME,
     ENV_GEMINI_EMBEDDING_MODEL, ENV_GEMINI_GENERATION_MODEL,
+    ENV_OPENAI_EMBEDDING_MODEL, ENV_OPENAI_GENERATION_MODEL,
+    ENV_CLAUDE_GENERATION_MODEL,
+    ENV_LLAMA_EMBEDDING_MODEL, ENV_LLAMA_GENERATION_MODEL, ENV_OLLAMA_BASE_URL,
     ENV_CHUNK_SIZE, ENV_CHUNK_OVERLAP,
     ENV_CODE_EXTENSIONS, ENV_TEMP_CLONE_DIR_BASE,
     ENV_OUTPUT_FILE_PATH,
@@ -73,10 +81,22 @@ class ApiKeysSettings(BaseSettings):
         extra = 'ignore'
         case_sensitive = False
 
-    google_api_key: str = Field(
-        ...,
+    google_api_key: Optional[str] = Field(
+        None,
         env=ENV_GOOGLE_API_KEY,
-        description="Google Gemini API key (required)"
+        description="Google Gemini API key"
+    )
+
+    openai_api_key: Optional[str] = Field(
+        None,
+        env=ENV_OPENAI_API_KEY,
+        description="OpenAI API key"
+    )
+
+    claude_api_key: Optional[str] = Field(
+        None,
+        env=ENV_CLAUDE_API_KEY,
+        description="Anthropic Claude API key"
     )
 
     github_token: Optional[str] = Field(
@@ -137,17 +157,99 @@ class LLMSettings(BaseSettings):
         extra = 'ignore'
         case_sensitive = False
 
-    embedding_model: str = Field(
+    # Provider selection
+    provider: str = Field(
+        default=DEFAULT_LLM_PROVIDER,
+        env=ENV_LLM_PROVIDER,
+        description="LLM provider to use (gemini, openai, claude, llama)"
+    )
+
+    # Gemini settings
+    gemini_embedding_model: str = Field(
         default=DEFAULT_GEMINI_EMBEDDING_MODEL,
         env=ENV_GEMINI_EMBEDDING_MODEL,
         description="Gemini model for embeddings"
     )
 
-    generation_model: str = Field(
+    gemini_generation_model: str = Field(
         default=DEFAULT_GEMINI_GENERATION_MODEL,
         env=ENV_GEMINI_GENERATION_MODEL,
         description="Gemini model for generation"
     )
+
+    # OpenAI settings
+    openai_embedding_model: str = Field(
+        default=DEFAULT_OPENAI_EMBEDDING_MODEL,
+        env=ENV_OPENAI_EMBEDDING_MODEL,
+        description="OpenAI model for embeddings"
+    )
+
+    openai_generation_model: str = Field(
+        default=DEFAULT_OPENAI_GENERATION_MODEL,
+        env=ENV_OPENAI_GENERATION_MODEL,
+        description="OpenAI model for generation"
+    )
+
+    # Claude settings
+    claude_generation_model: str = Field(
+        default=DEFAULT_CLAUDE_GENERATION_MODEL,
+        env=ENV_CLAUDE_GENERATION_MODEL,
+        description="Claude model for generation"
+    )
+
+    # Llama/Ollama settings
+    llama_embedding_model: str = Field(
+        default=DEFAULT_LLAMA_EMBEDDING_MODEL,
+        env=ENV_LLAMA_EMBEDDING_MODEL,
+        description="Llama model for embeddings (via Ollama)"
+    )
+
+    llama_generation_model: str = Field(
+        default=DEFAULT_LLAMA_GENERATION_MODEL,
+        env=ENV_LLAMA_GENERATION_MODEL,
+        description="Llama model for generation (via Ollama)"
+    )
+
+    ollama_base_url: str = Field(
+        default=DEFAULT_OLLAMA_BASE_URL,
+        env=ENV_OLLAMA_BASE_URL,
+        description="Ollama server base URL"
+    )
+
+    @validator("provider")
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        if v.lower() not in SUPPORTED_LLM_PROVIDERS:
+            raise ValueError(
+                f"Unsupported LLM provider: {v}. Supported providers: {SUPPORTED_LLM_PROVIDERS}")
+        return v.lower()
+
+    # Legacy fields for backward compatibility
+    @property
+    def embedding_model(self) -> str:
+        """Get embedding model based on current provider."""
+        if self.provider == "gemini":
+            return self.gemini_embedding_model
+        elif self.provider == "openai":
+            return self.openai_embedding_model
+        elif self.provider == "claude":
+            return self.openai_embedding_model  # Claude uses OpenAI for embeddings
+        elif self.provider == "llama":
+            return self.llama_embedding_model
+        return self.gemini_embedding_model
+
+    @property
+    def generation_model(self) -> str:
+        """Get generation model based on current provider."""
+        if self.provider == "gemini":
+            return self.gemini_generation_model
+        elif self.provider == "openai":
+            return self.openai_generation_model
+        elif self.provider == "claude":
+            return self.claude_generation_model
+        elif self.provider == "llama":
+            return self.llama_generation_model
+        return self.gemini_generation_model
 
 
 class ProcessingSettings(BaseSettings):

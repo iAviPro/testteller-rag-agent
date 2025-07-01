@@ -5,40 +5,81 @@ services:
       dockerfile: Dockerfile
     container_name: testteller_app
     restart: unless-stopped
-    # The container will stay running. Use 'docker-compose exec app python -m testteller.main <command>' to run commands
+    # The container will stay running. Use 'docker-compose exec app testteller <command>' to run commands
     command: serve
     environment:
-      # API Keys (Required)
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:?GOOGLE_API_KEY is required}
-      # Optional: GitHub token for private repos. Leave empty or unset if not needed
-      - GITHUB_TOKEN
+      # =============================================================================
+      # LLM PROVIDER CONFIGURATION
+      # =============================================================================
+      # Choose your LLM provider: gemini, openai, claude, llama
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
 
+      # -----------------------------------------------------------------------------
+      # API Keys (Configure based on your chosen LLM provider)
+      # -----------------------------------------------------------------------------
+      # Google Gemini (required for gemini provider)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # OpenAI (required for openai provider, also needed for claude embeddings)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Anthropic Claude (required for claude provider)
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      # GitHub token for private repos (optional)
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+      # -----------------------------------------------------------------------------
+      # LLM Model Configuration
+      # -----------------------------------------------------------------------------
+      # Gemini models
+      - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      - GEMINI_GENERATION_MODEL=${GEMINI_GENERATION_MODEL:-gemini-2.0-flash}
+      # OpenAI models
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      - OPENAI_GENERATION_MODEL=${OPENAI_GENERATION_MODEL:-gpt-4o-mini}
+      # Claude models
+      - CLAUDE_GENERATION_MODEL=${CLAUDE_GENERATION_MODEL:-claude-3-5-haiku-20241022}
+      # Llama/Ollama models (for local deployment)
+      - LLAMA_EMBEDDING_MODEL=${LLAMA_EMBEDDING_MODEL:-llama3.2:1b}
+      - LLAMA_GENERATION_MODEL=${LLAMA_GENERATION_MODEL:-llama3.2:3b}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+
+      # -----------------------------------------------------------------------------
       # ChromaDB Configuration
+      # -----------------------------------------------------------------------------
       - CHROMA_DB_HOST=chromadb
       - CHROMA_DB_PORT=8000
       - CHROMA_DB_USE_REMOTE=true
       - CHROMA_DB_PERSIST_DIRECTORY=/app/chroma_data
-      - DEFAULT_COLLECTION_NAME=${DEFAULT_COLLECTION_NAME:-test_documents_non_prod}
+      - DEFAULT_COLLECTION_NAME=${DEFAULT_COLLECTION_NAME:-test_documents}
 
+      # -----------------------------------------------------------------------------
       # Logging and Debug
+      # -----------------------------------------------------------------------------
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
 
-      # LLM Configuration
-      - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
-      - GEMINI_GENERATION_MODEL=${GEMINI_GENERATION_MODEL:-gemini-2.0-flash}
-
-      # Document Processing
+      # -----------------------------------------------------------------------------
+      # Document Processing Configuration
+      # -----------------------------------------------------------------------------
       - CHUNK_SIZE=${CHUNK_SIZE:-1000}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
       
-      # Code Loading
+      # -----------------------------------------------------------------------------
+      # Code Loading Configuration
+      # -----------------------------------------------------------------------------
       - CODE_EXTENSIONS=${CODE_EXTENSIONS:-".py,.js,.ts,.java,.go,.rs,.cpp,.hpp,.c,.h,.cs,.rb,.php"}
       - TEMP_CLONE_DIR_BASE=/app/temp_cloned_repos
 
+      # -----------------------------------------------------------------------------
       # Output Configuration
+      # -----------------------------------------------------------------------------
       - OUTPUT_FILE_PATH=${OUTPUT_FILE_PATH:-testteller_output.md}
+
+      # -----------------------------------------------------------------------------
+      # API Retry Configuration
+      # -----------------------------------------------------------------------------
+      - API_RETRY_ATTEMPTS=${API_RETRY_ATTEMPTS:-3}
+      - API_RETRY_WAIT_SECONDS=${API_RETRY_WAIT_SECONDS:-2}
 
     volumes:
       # Persistent storage for app data
@@ -52,6 +93,9 @@ services:
     depends_on:
       chromadb:
         condition: service_healthy
+      # Uncomment if using Llama provider
+      # ollama:
+      #   condition: service_healthy
     networks:
       - testteller_network
     deploy:
@@ -106,9 +150,41 @@ services:
           cpus: '0.25'
           memory: 512M
 
+  # Optional: Ollama service for local Llama models
+  # Uncomment this section if you want to use Llama provider with local models
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: testteller_ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:11434:11434"  # Only expose to localhost
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   networks:
+  #     - testteller_network
+  #   environment:
+  #     - OLLAMA_HOST=0.0.0.0:11434
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start-period: 60s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '2'
+  #         memory: 8G
+  #       reservations:
+  #         cpus: '1'
+  #         memory: 2G
+
 volumes:
   chroma_data:
     name: testteller_chroma_data
+  # Uncomment if using Ollama
+  # ollama_data:
+  #   name: testteller_ollama_data
 
 networks:
   testteller_network:

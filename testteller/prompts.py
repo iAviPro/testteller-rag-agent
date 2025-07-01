@@ -264,3 +264,154 @@ OUTPUT STRUCTURE:
 
 Generate the test cases now, following all templates and requirements exactly.
 """
+
+# Provider-specific prompt refinements
+PROVIDER_PROMPT_REFINEMENTS = {
+    "llama": {
+        "instruction_style": "direct",
+        "complexity_reduction": True,
+        "max_template_examples": 2,
+        "simplified_language": True,
+        "additional_guidance": """
+IMPORTANT FOR LLAMA: Keep responses focused and concise. 
+- Generate 2-3 test cases maximum per request
+- Use simple, direct language
+- Focus on one test type at a time
+- Avoid overly complex nested structures
+"""
+    },
+
+    "openai": {
+        "instruction_style": "structured",
+        "json_emphasis": True,
+        "systematic_approach": True,
+        "additional_guidance": """
+OPENAI OPTIMIZATION: Leverage structured thinking and JSON formatting.
+- Use systematic step-by-step approach
+- Emphasize consistent JSON structure for test data
+- Include clear validation criteria
+- Provide detailed technical specifications
+"""
+    },
+
+    "claude": {
+        "instruction_style": "detailed",
+        "context_awareness": True,
+        "reasoning_emphasis": True,
+        "additional_guidance": """
+CLAUDE OPTIMIZATION: Leverage analytical and contextual strengths.
+- Provide comprehensive context analysis before test generation
+- Include detailed reasoning for test case selection
+- Emphasize edge cases and error scenarios
+- Use sophisticated technical language and concepts
+"""
+    },
+
+    "gemini": {
+        "instruction_style": "balanced",
+        "multimodal_ready": True,
+        "code_integration": True,
+        "additional_guidance": """
+GEMINI OPTIMIZATION: Balanced approach with code integration.
+- Integrate code examples with test cases
+- Balance technical depth with clarity
+- Use standard testing terminology
+- Include both positive and negative test scenarios
+"""
+    }
+}
+
+
+def get_refined_prompt(base_prompt: str, provider: str, context: str, query: str) -> str:
+    """
+    Apply provider-specific refinements to the base prompt.
+
+    Args:
+        base_prompt: The base prompt template
+        provider: LLM provider name (gemini, openai, claude, llama)
+        context: Context information
+        query: User query
+
+    Returns:
+        Refined prompt optimized for the specific provider
+    """
+    # Get provider-specific refinements, default to gemini if provider not found
+    refinements = PROVIDER_PROMPT_REFINEMENTS.get(
+        provider.lower(), PROVIDER_PROMPT_REFINEMENTS["gemini"])
+
+    # Apply provider-specific modifications
+    refined_prompt = base_prompt
+
+    # Add provider-specific guidance
+    if "additional_guidance" in refinements:
+        refined_prompt = f"{refinements['additional_guidance']}\n\n{refined_prompt}"
+
+    # Apply complexity reduction for Llama
+    if provider.lower() == "llama" and refinements.get("complexity_reduction"):
+        refined_prompt = _apply_llama_simplification(refined_prompt)
+
+    # Apply OpenAI JSON emphasis
+    if provider.lower() == "openai" and refinements.get("json_emphasis"):
+        refined_prompt = _apply_openai_json_emphasis(refined_prompt)
+
+    # Apply Claude reasoning emphasis
+    if provider.lower() == "claude" and refinements.get("reasoning_emphasis"):
+        refined_prompt = _apply_claude_reasoning_emphasis(refined_prompt)
+
+    # Fill in the template variables
+    return refined_prompt.format(context=context, query=query)
+
+
+def _apply_llama_simplification(prompt: str) -> str:
+    """Simplify prompt for Llama model."""
+    # Add simplified instructions at the beginning
+    simplification = """
+SIMPLIFIED INSTRUCTIONS FOR EFFICIENCY:
+- Focus on generating 2-3 high-quality test cases
+- Use clear, straightforward language
+- Prioritize the most critical test scenarios
+- Keep templates concise but complete
+
+"""
+    return simplification + prompt
+
+
+def _apply_openai_json_emphasis(prompt: str) -> str:
+    """Add JSON structure emphasis for OpenAI."""
+    json_emphasis = """
+JSON STRUCTURE EMPHASIS:
+- Ensure all test data is in valid JSON format
+- Use consistent field naming conventions
+- Include JSON schema validation in assertions
+- Structure responses systematically
+
+"""
+    return json_emphasis + prompt
+
+
+def _apply_claude_reasoning_emphasis(prompt: str) -> str:
+    """Add reasoning emphasis for Claude."""
+    reasoning_emphasis = """
+ANALYTICAL APPROACH:
+- Begin with thorough documentation analysis
+- Explain reasoning behind each test case selection
+- Consider system interdependencies and edge cases
+- Provide comprehensive coverage rationale
+
+"""
+    return reasoning_emphasis + prompt
+
+
+def get_test_case_generation_prompt(provider: str, context: str, query: str) -> str:
+    """
+    Get the test case generation prompt optimized for the specific LLM provider.
+
+    Args:
+        provider: LLM provider name (gemini, openai, claude, llama)
+        context: Context information from ingested documents
+        query: User's test generation query
+
+    Returns:
+        Provider-optimized prompt ready for LLM consumption
+    """
+    return get_refined_prompt(TEST_CASE_GENERATION_PROMPT_TEMPLATE, provider, context, query)

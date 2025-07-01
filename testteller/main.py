@@ -9,7 +9,7 @@ from .agent import TestTellerRagAgent
 from .config import settings
 from .constants import (
     DEFAULT_LOG_LEVEL, DEFAULT_GEMINI_EMBEDDING_MODEL, DEFAULT_GEMINI_GENERATION_MODEL,
-    DEFAULT_OUTPUT_FILE, DEFAULT_COLLECTION_NAME
+    DEFAULT_OUTPUT_FILE, DEFAULT_COLLECTION_NAME, DEFAULT_LLM_PROVIDER, SUPPORTED_LLM_PROVIDERS
 )
 from .utils.helpers import setup_logging
 from .utils.loader import with_spinner
@@ -32,10 +32,29 @@ app = typer.Typer(
 
 # Default .env template with descriptions
 ENV_TEMPLATE = {
+    "LLM_PROVIDER": {
+        "value": DEFAULT_LLM_PROVIDER,
+        "required": False,
+        "description": f"LLM provider to use ({', '.join(SUPPORTED_LLM_PROVIDERS)})",
+        "options": SUPPORTED_LLM_PROVIDERS
+    },
     "GOOGLE_API_KEY": {
         "value": "",
-        "required": True,
-        "description": "Your Google Gemini API key (required)"
+        "required": False,
+        "description": "Your Google Gemini API key (required for Gemini)",
+        "conditional": "gemini"
+    },
+    "OPENAI_API_KEY": {
+        "value": "",
+        "required": False,
+        "description": "Your OpenAI API key (required for OpenAI)",
+        "conditional": "openai"
+    },
+    "CLAUDE_API_KEY": {
+        "value": "",
+        "required": False,
+        "description": "Your Anthropic Claude API key (required for Claude)",
+        "conditional": "claude"
     },
     "GITHUB_TOKEN": {
         "value": "",
@@ -56,16 +75,6 @@ ENV_TEMPLATE = {
         "value": "test_data_non_prod",
         "required": False,
         "description": "Default ChromaDB collection name"
-    },
-    "GEMINI_EMBEDDING_MODEL": {
-        "value": DEFAULT_GEMINI_EMBEDDING_MODEL,
-        "required": False,
-        "description": "Gemini model for embeddings"
-    },
-    "GEMINI_GENERATION_MODEL": {
-        "value": DEFAULT_GEMINI_GENERATION_MODEL,
-        "required": False,
-        "description": "Gemini model for generation"
     },
     "OUTPUT_FILE_PATH": {
         "value": DEFAULT_OUTPUT_FILE,
@@ -410,11 +419,45 @@ def configure():
 
     env_values = {}
 
+    # First, handle LLM provider selection
+    llm_provider_config = ENV_TEMPLATE["LLM_PROVIDER"]
+    print(f"\n{llm_provider_config['description']}")
+    print("Available providers:")
+    for i, provider in enumerate(llm_provider_config["options"], 1):
+        print(f"  {i}. {provider}")
+
+    while True:
+        try:
+            choice = typer.prompt(
+                "\nSelect LLM provider (enter number)", type=int)
+            if 1 <= choice <= len(llm_provider_config["options"]):
+                selected_provider = llm_provider_config["options"][choice - 1]
+                env_values["LLM_PROVIDER"] = selected_provider
+                break
+            else:
+                print("Invalid choice. Please enter a valid number.")
+        except (ValueError, typer.Abort):
+            print("Invalid input. Please enter a number.")
+
+    print(f"\n✅ Selected LLM provider: {selected_provider}")
+
     # Collect values for each setting
     for key, config in ENV_TEMPLATE.items():
+        if key == "LLM_PROVIDER":  # Already handled above
+            continue
+
         description = config["description"]
         default = config["value"]
         required = config["required"]
+        conditional = config.get("conditional")
+
+        # Skip conditional fields if they don't match the selected provider
+        if conditional and conditional != selected_provider:
+            continue
+
+        # For API keys, make them required if they match the selected provider
+        if conditional and conditional == selected_provider:
+            required = True
 
         # Format prompt based on whether the field is required
         prompt = f"\n{description}"
@@ -423,19 +466,43 @@ def configure():
         elif default:
             prompt += f" (default: {default})"
 
+        # Special handling for Llama provider
+        if selected_provider == "llama" and key in ["GOOGLE_API_KEY", "OPENAI_API_KEY", "CLAUDE_API_KEY"]:
+            continue  # Skip API keys for Llama since it uses local Ollama
+
         # Get user input
         while True:
-            value = typer.prompt(
-                prompt, default=default if not required else None, show_default=True)
-            if value or not required:
-                break
-            print("This field is required. Please provide a value.")
+            try:
+                value = typer.prompt(
+                    prompt, default=default if not required else None, show_default=bool(default))
+                if value or not required:
+                    break
+                print("This field is required. Please provide a value.")
+            except typer.Abort:
+                print("Configuration cancelled.")
+                raise typer.Exit()
 
         if value:
             env_values[key] = value
 
+    # Special message for Llama users
+    if selected_provider == "llama":
+        print("\n📝 Note for Llama users:")
+        print("   - Make sure Ollama is installed and running (http://localhost:11434)")
+        print("   - Install required models: ollama pull llama3.2:1b && ollama pull llama3.2:3b")
+        print("   - No API key is required for local Llama models")
+
+    # Special message for Claude users
+    if selected_provider == "claude":
+        print("\n📝 Note for Claude users:")
+        print(
+            "   - Claude uses OpenAI for embeddings, so you'll need an OpenAI API key too")
+        print("   - This is handled automatically in the background")
+
     # Try to read additional non-critical configs from .env.example
     additional_configs = {}
+    provider_specific_configs = {}
+
     if os.path.exists(env_example_path):
         try:
             with open(env_example_path, 'r') as f:
@@ -445,20 +512,54 @@ def configure():
                         key, value = line.split('=', 1)
                         key = key.strip()
                         value = value.strip().strip('"').strip("'")
+
+                        # Skip placeholder values
+                        if 'your_' in value.lower() and '_here' in value.lower():
+                            continue
+
                         # Only add if it's not already in env_values and not in ENV_TEMPLATE
                         if key not in env_values and key not in ENV_TEMPLATE:
-                            additional_configs[key] = value
+                            # Categorize provider-specific vs general configs
+                            if any(provider in key.lower() for provider in ['gemini', 'openai', 'claude', 'llama', 'ollama']):
+                                provider_specific_configs[key] = value
+                            else:
+                                additional_configs[key] = value
 
+            # Handle general additional configs
             if additional_configs:
-                print("\nFound additional configurations in .env.example:")
+                print(
+                    f"\n📋 Found {len(additional_configs)} additional configuration(s) in .env.example:")
                 for key, value in additional_configs.items():
-                    print(f"  - {key}")
+                    print(f"  - {key}={value}")
 
                 if typer.confirm("\nWould you like to include these additional configurations?", default=True):
                     env_values.update(additional_configs)
-                    print("Additional configurations included.")
+                    print("✅ Additional configurations included.")
                 else:
-                    print("Additional configurations skipped.")
+                    print("⏭️  Additional configurations skipped.")
+
+            # Handle provider-specific configs (auto-include relevant ones)
+            relevant_provider_configs = {}
+            for key, value in provider_specific_configs.items():
+                key_lower = key.lower()
+                if (selected_provider == "gemini" and "gemini" in key_lower) or \
+                   (selected_provider == "openai" and "openai" in key_lower) or \
+                   (selected_provider == "claude" and ("claude" in key_lower or "openai" in key_lower)) or \
+                   (selected_provider == "llama" and ("llama" in key_lower or "ollama" in key_lower)):
+                    relevant_provider_configs[key] = value
+
+            if relevant_provider_configs:
+                print(
+                    f"\n🔧 Found {len(relevant_provider_configs)} {selected_provider}-specific configuration(s):")
+                for key, value in relevant_provider_configs.items():
+                    print(f"  - {key}={value}")
+
+                if typer.confirm(f"\nInclude {selected_provider}-specific configurations?", default=True):
+                    env_values.update(relevant_provider_configs)
+                    print(f"✅ {selected_provider} configurations included.")
+                else:
+                    print(f"⏭️  {selected_provider} configurations skipped.")
+
         except Exception as e:
             logger.warning("Could not read .env.example: %s", e)
             # Silently continue without additional configs
@@ -480,8 +581,49 @@ def configure():
 
         print("\n✅ Configuration complete!")
         print(f"Configuration saved to: {env_path}")
-        print("\nYou can now use TestTeller commands. Try:")
-        print("  testteller --help")
+        print(f"LLM Provider: {selected_provider}")
+
+        # Report what was copied from .env.example
+        copied_from_example = []
+        for key in env_values:
+            if key not in ENV_TEMPLATE:
+                copied_from_example.append(key)
+
+        if copied_from_example:
+            print(
+                f"\n📋 Copied {len(copied_from_example)} additional configuration(s) from .env.example:")
+            for key in copied_from_example:
+                print(f"  - {key}={env_values[key]}")
+            print(
+                f"\n💡 You can modify these settings directly in {env_path} anytime:")
+            for key in copied_from_example:
+                print(f"   {key}")
+
+        # Validate the configuration
+        try:
+            from testteller.llm.llm_manager import LLMManager
+            is_valid, error_msg = LLMManager.validate_provider_config(
+                selected_provider)
+            if is_valid:
+                print("\n✅ Configuration validated successfully!")
+            else:
+                print(f"\n⚠️  Configuration validation warning: {error_msg}")
+        except Exception as e:
+            print(f"\n⚠️  Could not validate configuration: {e}")
+
+        print(f"\n🚀 Setup Summary:")
+        print(f"  • LLM Provider: {selected_provider}")
+        print(f"  • Configuration file: {env_path}")
+        if copied_from_example:
+            print(
+                f"  • Additional settings: {len(copied_from_example)} copied from .env.example")
+        print(f"  • Ready to use!")
+
+        print("\n📚 Next steps:")
+        print("  testteller --help                    # View all commands")
+        print("  testteller ingest-docs <path>        # Add documents")
+        print("  testteller ingest-code <repo_url>    # Add code")
+        print("  testteller generate \"<query>\"        # Generate tests")
 
     except Exception as e:
         print(f"\n❌ Error saving configuration: {e}")

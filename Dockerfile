@@ -76,7 +76,7 @@ RUN mkdir -p /app/chroma_data \
     && chmod -R 777 /app/chroma_data \
     && chmod -R 777 /app/temp_cloned_repos
 
-# Create entrypoint script with improved error handling
+# Create entrypoint script with multi-LLM support and improved error handling
 RUN echo '#!/bin/bash\n\
     set -e\n\
     \n\
@@ -93,18 +93,67 @@ RUN echo '#!/bin/bash\n\
     return 1\n\
     }\n\
     \n\
-    # Function to validate environment\n\
+    # Function to validate environment based on LLM provider\n\
     validate_environment() {\n\
+    local provider=${LLM_PROVIDER:-gemini}\n\
+    echo "Validating environment for LLM provider: $provider"\n\
+    \n\
+    case "$provider" in\n\
+    "gemini")\n\
     if [ -z "$GOOGLE_API_KEY" ]; then\n\
-    echo "Error: GOOGLE_API_KEY is required"\n\
+    echo "Error: GOOGLE_API_KEY is required for Gemini provider"\n\
     return 1\n\
     fi\n\
+    ;;\n\
+    "openai")\n\
+    if [ -z "$OPENAI_API_KEY" ]; then\n\
+    echo "Error: OPENAI_API_KEY is required for OpenAI provider"\n\
+    return 1\n\
+    fi\n\
+    ;;\n\
+    "claude")\n\
+    if [ -z "$CLAUDE_API_KEY" ]; then\n\
+    echo "Error: CLAUDE_API_KEY is required for Claude provider"\n\
+    return 1\n\
+    fi\n\
+    if [ -z "$OPENAI_API_KEY" ]; then\n\
+    echo "Error: OPENAI_API_KEY is also required for Claude provider (for embeddings)"\n\
+    return 1\n\
+    fi\n\
+    ;;\n\
+    "llama")\n\
+    echo "Note: Llama provider uses local Ollama - no API key required"\n\
+    echo "Make sure OLLAMA_BASE_URL is properly configured: ${OLLAMA_BASE_URL:-http://localhost:11434}"\n\
+    ;;\n\
+    *)\n\
+    echo "Error: Unsupported LLM provider: $provider"\n\
+    echo "Supported providers: gemini, openai, claude, llama"\n\
+    return 1\n\
+    ;;\n\
+    esac\n\
+    echo "Environment validation passed for $provider provider"\n\
+    }\n\
+    \n\
+    # Function to display configuration info\n\
+    display_config_info() {\n\
+    echo "=== TestTeller Configuration ==="\n\
+    echo "LLM Provider: ${LLM_PROVIDER:-gemini}"\n\
+    echo "ChromaDB Host: ${CHROMA_DB_HOST:-chromadb}"\n\
+    echo "Default Collection: ${DEFAULT_COLLECTION_NAME:-test_documents}"\n\
+    echo "Log Level: ${LOG_LEVEL:-INFO}"\n\
+    echo "================================"\n\
     }\n\
     \n\
     if [ "$1" = "serve" ]; then\n\
+    display_config_info\n\
     echo "Container is running. Use one of the following commands:"\n\
-    echo "  docker-compose exec app python -m testteller.main --help"\n\
-    echo "  docker-compose exec app python -m testteller.main <command> [options]"\n\
+    echo "  docker-compose exec app testteller --help"\n\
+    echo "  docker-compose exec app testteller configure"\n\
+    echo "  docker-compose exec app testteller <command> [options]"\n\
+    echo ""\n\
+    echo "Multi-LLM Support:"\n\
+    echo "  Set LLM_PROVIDER environment variable to: gemini, openai, claude, or llama"\n\
+    echo "  Configure appropriate API keys based on your chosen provider"\n\
     # Keep container running\n\
     tail -f /dev/null\n\
     else\n\
